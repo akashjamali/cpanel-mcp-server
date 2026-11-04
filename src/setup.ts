@@ -1,0 +1,200 @@
+/**
+ * cPanel MCP Server - Interactive Setup Wizard
+ *
+ * @author AkashJamali
+ * @license MIT
+ * @copyright (c) 2026 AkashJamali. All rights reserved.
+ * @link https://github.com/AkashJamali/cpanel-mcp-server
+ */
+
+import readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { CpanelClient, CpanelApiError } from "./cpanel-api.js";
+import { saveGlobalConfig, getGlobalConfigPath } from "./config.js";
+
+async function main() {
+  const rl = readline.createInterface({ input, output });
+
+  console.log("\n=======================================================");
+  console.log("   cPanel MCP Server - Quick Setup Wizard");
+  console.log("   Author: AkashJamali | License: MIT");
+  console.log("=======================================================\n");
+
+  console.log("This wizard will help you connect your cPanel account");
+  console.log("and generate the configuration for your AI assistants.\n");
+
+  console.log("📌 How to get your cPanel API Token:");
+  console.log("  1. Log into your cPanel account in your web browser.");
+  console.log("  2. Search for or navigate to: Security -> Manage API Tokens.");
+  console.log("  3. Click 'Create Token', give it a name (e.g. 'mcp-server').");
+  console.log("  4. Copy the generated token string.\n");
+
+  // 1. Server URL
+  let serverUrl = "";
+  while (!serverUrl) {
+    const rawUrl = await rl.question("1. Enter your cPanel Server URL (e.g., https://example.com:2083): ");
+    let cleaned = rawUrl.trim();
+    if (!cleaned) continue;
+
+    if (!cleaned.startsWith("http://") && !cleaned.startsWith("https://")) {
+      cleaned = `https://${cleaned}`;
+    }
+    // Check if port is specified, if not suggest/add :2083
+    try {
+      const parsed = new URL(cleaned);
+      if (!parsed.port && parsed.protocol === "https:") {
+        const addPort = await rl.question(`   No port specified. Use standard cPanel port 2083 (${parsed.origin}:2083)? [Y/n]: `);
+        if (addPort.trim().toLowerCase() !== "n") {
+          parsed.port = "2083";
+          cleaned = parsed.toString();
+        }
+      }
+      serverUrl = cleaned.replace(/\/+$/, "");
+    } catch {
+      console.log("   ❌ Invalid URL format. Please try again.");
+    }
+  }
+
+  // 2. Username
+  let username = "";
+  while (!username) {
+    const u = await rl.question("2. Enter your cPanel username: ");
+    if (u.trim()) username = u.trim();
+  }
+
+  // 3. API Token
+  let apiToken = "";
+  while (!apiToken) {
+    const t = await rl.question("3. Enter your cPanel API token: ");
+    if (t.trim()) apiToken = t.trim();
+  }
+
+  // 4. Verify SSL
+  const sslPrompt = await rl.question("4. Does your server use a valid SSL certificate? [Y/n (n for self-signed)]: ");
+  const verifySsl = sslPrompt.trim().toLowerCase() !== "n";
+
+  console.log("\n⏳ Testing connection to cPanel server...");
+
+  // Set process.env temporarily for testing
+  process.env.CPANEL_SERVER_URL = serverUrl;
+  process.env.CPANEL_USERNAME = username;
+  process.env.CPANEL_API_TOKEN = apiToken;
+  process.env.CPANEL_VERIFY_SSL = verifySsl ? "true" : "false";
+
+  let client: CpanelClient | null = null;
+  let connectionSuccess = false;
+
+  try {
+    client = new CpanelClient();
+    const result = await client.uapi("DomainInfo", "domains_data", { format: "hash" });
+    connectionSuccess = true;
+    console.log("✅ Connection SUCCESSFUL!");
+    if (result.data && typeof result.data === "object" && "main_domain" in (result.data as Record<string, unknown>)) {
+      console.log(`   Connected to main domain: ${(result.data as Record<string, unknown>).main_domain}`);
+    }
+  } catch (err: unknown) {
+    console.log("\n❌ Connection test failed!");
+    if (err instanceof CpanelApiError) {
+      console.log(`   Reason: ${err.message}`);
+    } else if (err instanceof Error) {
+      console.log(`   Reason: ${err.message}`);
+    } else {
+      console.log(`   Reason: ${String(err)}`);
+    }
+    console.log("\n   Troubleshooting tips:");
+    console.log("   - Check if port 2083 is open in your firewall.");
+    console.log("   - Verify your API token has not expired or been revoked.");
+    console.log("   - If your server uses a self-signed certificate, answer 'n' to SSL verification.");
+
+    const saveAnyway = await rl.question("\nDo you still want to save these settings? [y/N]: ");
+    if (saveAnyway.trim().toLowerCase() !== "y") {
+      console.log("Setup aborted without saving.");
+      rl.close();
+      if (client) client.destroy();
+      return;
+    }
+  } finally {
+    if (client) client.destroy();
+  }
+
+  // Save .env file
+  const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const envFilePath = path.join(rootDir, ".env");
+
+  const envContent = `# cPanel MCP Server Configuration
+# Generated by AkashJamali Setup Wizard
+CPANEL_SERVER_URL=${serverUrl}
+CPANEL_USERNAME=${username}
+CPANEL_API_TOKEN=${apiToken}
+CPANEL_VERIFY_SSL=${verifySsl ? "true" : "false"}
+CPANEL_TIMEOUT_MS=30000
+CPANEL_ALLOW_INSECURE_HTTP=false
+`;
+
+  fs.writeFileSync(envFilePath, envContent, "utf-8");
+  console.log(`\n💾 Saved local configuration to: ${envFilePath}`);
+
+  // Save globally in ~/.cpanel-mcp/config.json for npx users
+  saveGlobalConfig({
+    serverUrl,
+    username,
+    apiToken,
+    verifySsl,
+  });
+  console.log(`💾 Saved global configuration to: ${getGlobalConfigPath()}`);
+
+  // Print client configuration snippets
+  const buildIndexPath = path.join(rootDir, "build", "index.js");
+
+  console.log("\n=======================================================");
+  console.log("🎉 You are ready to connect to your AI Assistants!");
+  console.log("=======================================================\n");
+
+  console.log("Option A: Claude Desktop (claude_desktop_config.json)");
+  console.log(
+    JSON.stringify(
+      {
+        mcpServers: {
+          cpanel: {
+            command: "node",
+            args: [buildIndexPath],
+            env: {
+              CPANEL_SERVER_URL: serverUrl,
+              CPANEL_USERNAME: username,
+              CPANEL_API_TOKEN: apiToken,
+            },
+          },
+        },
+      },
+      null,
+      2
+    )
+  );
+
+  console.log("\nOption B: Using with .env file (No env vars in client config needed)");
+  console.log(
+    JSON.stringify(
+      {
+        mcpServers: {
+          cpanel: {
+            command: "node",
+            args: [buildIndexPath],
+          },
+        },
+      },
+      null,
+      2
+    )
+  );
+
+  console.log("\nSetup complete! You can rerun this anytime with: npm run setup\n");
+  rl.close();
+}
+
+main().catch((err) => {
+  console.error("Setup error:", err);
+  process.exit(1);
+});

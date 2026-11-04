@@ -1,0 +1,284 @@
+/**
+ * cPanel MCP Server
+ *
+ * @author AkashJamali
+ * @license MIT
+ * @copyright (c) 2026 AkashJamali. All rights reserved.
+ * @link https://github.com/AkashJamali/cpanel-mcp-server
+ */
+import { z } from "zod";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { CpanelClient } from "../cpanel-api.js";
+import { handleToolCall, formatData, formatSuccess } from "../tool-helpers.js";
+import { validateEmail, validateDomain } from "../validation.js";
+
+export function registerEmailTools(server: McpServer, client: CpanelClient) {
+  server.tool(
+    "list_email_accounts",
+    "List all email accounts with disk usage info",
+    {},
+    async () =>
+      handleToolCall(async () => {
+        const result = await client.uapi("Email", "list_pops_with_disk");
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "create_email_account",
+    "Create a new email account",
+    {
+      email: z.string().describe("Email address (user@domain.com)"),
+      password: z.string().describe("Password for the email account"),
+      quota: z.string().default("1024").describe("Mailbox quota in MB (0 for unlimited)"),
+    },
+    async ({ email, password, quota }) =>
+      handleToolCall(async () => {
+        const { user, domain } = validateEmail(email);
+        const result = await client.uapi("Email", "add_pop", {
+          email: user,
+          domain,
+          password,
+          quota,
+        });
+        return formatSuccess(`Email account created: ${email}`, result.data);
+      })
+  );
+
+  server.tool(
+    "delete_email_account",
+    "Delete an email account",
+    { email: z.string().describe("Email address to delete (user@domain.com)") },
+    async ({ email }) =>
+      handleToolCall(async () => {
+        const { user, domain } = validateEmail(email);
+        const result = await client.uapi("Email", "delete_pop", {
+          email: user,
+          domain,
+        });
+        return formatSuccess(`Email account deleted: ${email}`, result.data);
+      })
+  );
+
+  server.tool(
+    "change_email_password",
+    "Change password for an email account",
+    {
+      email: z.string().describe("Email address (user@domain.com)"),
+      password: z.string().describe("New password"),
+    },
+    async ({ email, password }) =>
+      handleToolCall(async () => {
+        const { user, domain } = validateEmail(email);
+        const result = await client.uapi("Email", "passwd_pop", {
+          email: user,
+          domain,
+          password,
+        });
+        return formatSuccess(`Password changed for: ${email}`, result.data);
+      })
+  );
+
+  server.tool(
+    "change_email_quota",
+    "Change mailbox quota for an email account",
+    {
+      email: z.string().describe("Email address (user@domain.com)"),
+      quota: z.string().describe("New quota in MB (0 for unlimited)"),
+    },
+    async ({ email, quota }) =>
+      handleToolCall(async () => {
+        const { user, domain } = validateEmail(email);
+        const result = await client.uapi("Email", "edit_pop_quota", {
+          email: user,
+          domain,
+          quota,
+        });
+        return formatSuccess(`Quota updated for ${email}: ${quota}MB`, result.data);
+      })
+  );
+
+  // --- Forwarders ---
+
+  server.tool(
+    "list_email_forwarders",
+    "List all email forwarders",
+    {},
+    async () =>
+      handleToolCall(async () => {
+        const result = await client.uapi("Email", "list_forwarders");
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "create_email_forwarder",
+    "Create an email forwarder",
+    {
+      email: z.string().describe("Email address to forward from (user@domain.com)"),
+      forward_to: z.string().describe("Destination email address"),
+    },
+    async ({ email, forward_to }) =>
+      handleToolCall(async () => {
+        validateEmail(email);
+        validateEmail(forward_to);
+        const domain = email.substring(email.lastIndexOf("@") + 1);
+        const result = await client.uapi("Email", "add_forwarder", {
+          domain,
+          email,
+          fwdopt: "fwd",
+          fwdemail: forward_to,
+        });
+        return formatSuccess(`Forwarder created: ${email} → ${forward_to}`, result.data);
+      })
+  );
+
+  server.tool(
+    "delete_email_forwarder",
+    "Delete an email forwarder",
+    {
+      email: z.string().describe("Forwarder source address"),
+      forward_to: z.string().describe("Forwarder destination to remove"),
+    },
+    async ({ email, forward_to }) =>
+      handleToolCall(async () => {
+        const result = await client.uapi("Email", "delete_forwarder", {
+          address: email,
+          forwarder: forward_to,
+        });
+        return formatSuccess(`Forwarder deleted: ${email} → ${forward_to}`, result.data);
+      })
+  );
+
+  // --- Autoresponders ---
+
+  server.tool(
+    "list_autoresponders",
+    "List all email autoresponders",
+    {},
+    async () =>
+      handleToolCall(async () => {
+        const result = await client.uapi("Email", "list_auto_responders");
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "create_autoresponder",
+    "Create an email autoresponder",
+    {
+      email: z.string().describe("Email address (user@domain.com)"),
+      from: z.string().describe("From name for the autoresponse"),
+      subject: z.string().describe("Autoresponse subject line"),
+      body: z.string().describe("Autoresponse body text"),
+      interval: z.string().default("24").describe("Hours between autoresponses to same sender"),
+    },
+    async ({ email, from, subject, body, interval }) =>
+      handleToolCall(async () => {
+        const { user, domain } = validateEmail(email);
+        const result = await client.uapi("Email", "add_auto_responder", {
+          email: user,
+          domain,
+          from,
+          subject,
+          body,
+          interval,
+        });
+        return formatSuccess(`Autoresponder created for: ${email}`, result.data);
+      })
+  );
+
+  server.tool(
+    "delete_autoresponder",
+    "Delete an email autoresponder",
+    { email: z.string().describe("Email address (user@domain.com)") },
+    async ({ email }) =>
+      handleToolCall(async () => {
+        validateEmail(email);
+        const result = await client.uapi("Email", "delete_auto_responder", { email });
+        return formatSuccess(`Autoresponder deleted for: ${email}`, result.data);
+      })
+  );
+
+  // --- Email Routing & Client Settings ---
+
+  server.tool(
+    "get_email_routing",
+    "Get email routing configuration for all mail domains",
+    {},
+    async () =>
+      handleToolCall(async () => {
+        const result = await client.uapi("Email", "list_mail_domains");
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "get_email_client_settings",
+    "Get mail client manual and auto-config settings (IMAP, POP3, SMTP ports, hostnames, SSL settings)",
+    { account: z.string().describe("Email address (e.g. user@domain.com)") },
+    async ({ account }) =>
+      handleToolCall(async () => {
+        validateEmail(account);
+        const result = await client.uapi("Email", "get_client_settings", { account });
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "get_email_disk_usage",
+    "Get detailed disk space consumption for a specific email address",
+    { email: z.string().describe("Email address (user@domain.com)") },
+    async ({ email }) =>
+      handleToolCall(async () => {
+        const { user, domain } = validateEmail(email);
+        const result = await client.uapi("Email", "get_disk_usage", { user, domain });
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "get_default_address",
+    "Get the catch-all (default) email address destination for a domain",
+    { domain: z.string().describe("Domain name (e.g. example.com)") },
+    async ({ domain }) =>
+      handleToolCall(async () => {
+        const d = validateDomain(domain);
+        const result = await client.uapi("Email", "get_default_address", { domain: d });
+        return formatData(result.data);
+      })
+  );
+
+  server.tool(
+    "set_default_address",
+    "Configure the catch-all (default) email behavior for unrouted emails sent to a domain",
+    {
+      domain: z.string().describe("Domain name (e.g. example.com)"),
+      forward_to: z.string().describe("Destination email address to forward unrouted mail to, or ':fail:' to bounce"),
+    },
+    async ({ domain, forward_to }) =>
+      handleToolCall(async () => {
+        const d = validateDomain(domain);
+        const fwdopt = forward_to === ":fail:" ? "fail" : "fwd";
+        const params: Record<string, string> = { domain: d, fwdopt };
+        if (fwdopt === "fwd") {
+          validateEmail(forward_to);
+          params.fwdemail = forward_to;
+        }
+        const result = await client.uapi("Email", "set_default_address", params);
+        return formatSuccess(`Default email address for '${d}' configured to: ${forward_to}`, result.data);
+      })
+  );
+
+  server.tool(
+    "trace_email_delivery",
+    "Trace mail delivery and routing path for an email address to debug delivery failures",
+    { recipient: z.string().describe("Recipient email address to test delivery for") },
+    async ({ recipient }) =>
+      handleToolCall(async () => {
+        validateEmail(recipient);
+        const result = await client.uapi("EmailTrack", "trace_delivery", { recipient });
+        return formatData(result.data);
+      })
+  );
+}

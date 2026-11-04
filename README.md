@@ -6,7 +6,14 @@
 [![MCP Protocol](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol-purple.svg)](https://modelcontextprotocol.io)
 [![Tools](https://img.shields.io/badge/Tools-214%20Tools-orange.svg)](#1-mcp-tools-214-total)
 [![Tests](https://img.shields.io/badge/Tests-Passing%20(100%25)-brightgreen.svg)](test/)
-
+<p align="center">
+  <a href="https://hellosindh.com" target="_blank">
+    <img src="https://hellosindh.com/Media/logo-header.webp" alt="Hello Sindh Logo" height="50">
+  </a>
+</p>
+<p align="center">
+  <b>Developed by Akash Jamali with contributions from <a href="https://hellosindh.com">HelloSindh.com</a></b>
+</p>
 A comprehensive, production-grade **Model Context Protocol (MCP)** server for controlling and automating **cPanel hosting environments** via AI assistants, redesigned and architected by **AkashJamali**.
 
 Directly bridges AI models with cPanel's UAPI and API2 engines, unlocking natural-language orchestration of files, MySQL/PostgreSQL databases, DNS, email systems, SSL certificates, Git deployment, Node.js applications, Python frameworks (Flask/Django/FastAPI), Laravel hosting, GitHub CI/CD automated redeployment, and built-in AI safety guardrails.
